@@ -20,7 +20,14 @@ vectorstore = Chroma(
 
 query = "What is Infosys revenue?"
 
-docs = vectorstore.similarity_search(query, k=10)
+retriver = vectorstore.as_retriever(
+    search_type='mmr',
+    search_kwargs={'k':5}
+)
+
+docs = retriver.invoke(query)
+
+
 context_text = "\n\n".join([doc.page_content for doc in docs])
 
 print(context_text)
