@@ -1,9 +1,12 @@
-from langchain_huggingface import HuggingFaceEmbeddings
-from dotenv import load_dotenv
 from langchain_chroma import Chroma
-from chunk import chunks
+from langchain_huggingface import HuggingFaceEmbeddings
+import pickle
+import os
 
-load_dotenv()
+with open("chunks.pkl", "rb") as f:
+    chunks = pickle.load(f)
+
+print(f"Loaded {len(chunks)} chunks from chunks.pkl")
 
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -15,9 +18,4 @@ vectorstore = Chroma.from_documents(
     persist_directory="./chroma_db"
 )
 
-print("Vector DB Created Successfully")
-
-vector = embeddings.embed_query("Hello world")
-
-print(vector)
-print(len(vector))
+print("Done. Total vectors stored:", vectorstore._collection.count())

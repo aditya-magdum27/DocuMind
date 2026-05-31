@@ -8,7 +8,6 @@ from langchain_core.prompts import PromptTemplate
 
 load_dotenv()
 
-
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
@@ -18,22 +17,28 @@ vectorstore = Chroma(
     embedding_function=embeddings
 )
 
-query = "What is Infosys revenue?"
-
-retriver = vectorstore.as_retriever(
-    search_type='mmr',
-    search_kwargs={'k':5}
+retriever = vectorstore.as_retriever(
+    search_type='similarity',
+    search_kwargs={'k': 10}
 )
 
-docs = retriver.invoke(query)
+query = "What is the amount involved in frauds by public sector banks in 2025-26?"
 
+docs = retriever.invoke(query)
 
-context_text = "\n\n".join([doc.page_content for doc in docs])
+context = "\n\n".join(
+    doc.page_content for doc in docs
+)
 
-print(context_text)
+print(f"Retrieved {len(docs)} chunks\n")
+print(context)
+print("\n" + "="*60 + "\n")
+
+# Fixed: was template="""" (extra leading quote causing malformed prompt)
 prompt = PromptTemplate(
-    template=""""
-        Answer the following question from given context only if the context is not provode info or u don't know it just return "i don't know"
+    template="""
+        Answer the following question using only the provided context.
+        If the context does not contain enough information, respond with "I don't know".
 
         context:
         {context}
@@ -41,11 +46,11 @@ prompt = PromptTemplate(
         question:
         {query}
     """,
-    input_variables=['query','context']
+    input_variables=['query', 'context']
 )
 
 final_prompt = prompt.format(
-    context=context_text,
+    context=context,
     query=query
 )
 
