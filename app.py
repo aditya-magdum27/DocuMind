@@ -34,7 +34,6 @@ print(f"Retrieved {len(docs)} chunks\n")
 print(context)
 print("\n" + "="*60 + "\n")
 
-# Fixed: was template="""" (extra leading quote causing malformed prompt)
 prompt = PromptTemplate(
     template="""
         Answer the following question using only the provided context.
@@ -60,4 +59,17 @@ model = ChatGroq(
 
 result = model.invoke(final_prompt)
 
-print(result.content)
+print("This is the answer form llm " + result.content)
+print("\nSources Used:")
+
+seen = set()
+
+for doc in docs:
+    source = doc.metadata.get("source_file")
+    page = doc.metadata.get("page")
+
+    key = (source, page)
+
+    if key not in seen:
+        seen.add(key)
+        print(f"{source} | Page {page}")
