@@ -1,11 +1,13 @@
 import os
-import pickle
 
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_chroma import Chroma
 
-PDF_FOLDER = "Data/raw_pdfs"  
-OUTPUT_FILE = "chunks.pkl"
+
+
+PDF_FOLDER = "Data/raw_pdfs"
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
@@ -33,7 +35,15 @@ for file in os.listdir(PDF_FOLDER):
 
 print(f"Total chunks created: {len(all_chunks)}")
 
-with open(OUTPUT_FILE, "wb") as f:
-    pickle.dump(all_chunks, f)
 
-print("Done!")
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
+vectorstore = Chroma.from_documents(
+    documents=all_chunks,
+    embedding=embeddings,
+    persist_directory="./chroma_db"
+)
+
+print("Done. Total vectors stored:", vectorstore._collection.count())

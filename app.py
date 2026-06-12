@@ -1,9 +1,8 @@
 import os
-import pickle
 import numpy as np
-os.environ["HF_HUB_OFFLINE"] = "1"
-from langchain_groq import ChatGroq
+
 from dotenv import load_dotenv
+from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.prompts import PromptTemplate
@@ -22,16 +21,13 @@ vectorstore = Chroma(
 
 retriever = vectorstore.as_retriever(
     search_type="similarity",
-    search_kwargs={"k": 5}
+    search_kwargs={"k": 7}
 )
 
-with open("chunks.pkl", "rb") as f:
-    chunks = pickle.load(f)
 
-corpus = [
-    chunk.page_content.split()
-    for chunk in chunks
-]
+chroma_data = vectorstore._collection.get(include=["documents", "metadatas"])
+
+corpus = [text.split() for text in chroma_data["documents"]]
 
 bm25 = BM25Okapi(corpus)
 
@@ -47,15 +43,25 @@ scores = bm25.get_scores(query_tokens)
 
 top_n = np.argsort(scores)[::-1][:5]
 
-bm25_docs = [
-    chunks[i]
-    for i in top_n
-]
+
+class Doc:
+    pass
+
+bm25_docs = []
+
+for i in top_n:
+    text = chroma_data["documents"][i]
+    meta = chroma_data["metadatas"][i]
+
+    doc = Doc()
+    doc.page_content = text
+    doc.metadata = meta
+
+    bm25_docs.append(doc)
 
 print(f"BM25 Results: {len(bm25_docs)}")
 
 combined_docs = semantic_docs + bm25_docs
-
 seen = set()
 unique_docs = []
 
@@ -72,14 +78,10 @@ for doc in combined_docs:
 
 print(f"Unique Results: {len(unique_docs)}")
 
-context = "\n\n".join(
-    doc.page_content
-    for doc in unique_docs[:10]
-)
+context = "\n\n".join(doc.page_content for doc in unique_docs[:5])
 
 print("\nRetrieved Chunks:\n")
 print(context)
-
 
 prompt = PromptTemplate(
     template="""
@@ -101,6 +103,7 @@ final_prompt = prompt.format(
     context=context,
     query=query
 )
+
 model = ChatGroq(
     model="llama-3.3-70b-versatile"
 )
@@ -112,9 +115,18 @@ print(result.content)
 
 print("\nSources Used:\n")
 
-for doc in unique_docs:
+seen_citations = set()
 
-    source = doc.metadata.get("source_file")
+for doc in unique_docs[:5]:
+
+    source = doc.metadata.get("source_file", "Unknown")
     page = doc.metadata.get("page")
 
-    print(f"{source} | Page {page}")
+    # PyMuPDF pages are 0-indexed, so add 1 for display
+    page_display = int(page) + 1 if page is not None else "?"
+
+    citation = (source, page_display)
+
+    if citation not in seen_citations:
+        seen_citations.add(citation)
+        print(f"  File: {source}  |  Page: {page_display}")
