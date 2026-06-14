@@ -1,6 +1,5 @@
 import os
 import numpy as np
-
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -19,13 +18,34 @@ vectorstore = Chroma(
     embedding_function=embeddings
 )
 
+all_data = vectorstore._collection.get(include=["metadatas"])
+
+unique_files = list(set(
+    meta["source_file"] for meta in all_data["metadatas"]
+))
+
+print("\nAvailable PDFs:\n")
+for i, file in enumerate(unique_files, start=1):
+    print(f"  [{i}] {file}")
+
+selection = input("\nSelect a PDF number: ").strip()
+selected_file = unique_files[int(selection) - 1]
+
+print(f"\nQuerying: {selected_file}\n")
+
 retriever = vectorstore.as_retriever(
     search_type="similarity",
-    search_kwargs={"k": 7}
+    search_kwargs={
+        "k": 7,
+        "filter": {"source_file": selected_file}
+    }
 )
 
 
-chroma_data = vectorstore._collection.get(include=["documents", "metadatas"])
+chroma_data = vectorstore._collection.get(
+    where={"source_file": selected_file},
+    include=["documents", "metadatas"]
+)
 
 corpus = [text.split() for text in chroma_data["documents"]]
 
