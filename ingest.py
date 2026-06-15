@@ -1,5 +1,5 @@
 import os
-
+import shutil as st
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -10,9 +10,12 @@ from langchain_chroma import Chroma
 PDF_FOLDER = "Data/raw_pdfs"
 
 splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=150
+    chunk_size=1500,
+    chunk_overlap=400
 )
+
+if os.path.exists("./chroma_db"):
+    st.rmtree("./chroma_db")
 
 all_chunks = []
 

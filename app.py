@@ -36,7 +36,7 @@ print(f"\nQuerying: {selected_file}\n")
 retriever = vectorstore.as_retriever(
     search_type="similarity",
     search_kwargs={
-        "k": 7,
+        "k": 10,
         "filter": {"source_file": selected_file}
     }
 )
@@ -61,7 +61,7 @@ query_tokens = query.split()
 
 scores = bm25.get_scores(query_tokens)
 
-top_n = np.argsort(scores)[::-1][:5]
+top_n = np.argsort(scores)[::-1][:10]
 
 
 class Doc:
@@ -98,7 +98,7 @@ for doc in combined_docs:
 
 print(f"Unique Results: {len(unique_docs)}")
 
-context = "\n\n".join(doc.page_content for doc in unique_docs[:5])
+context = "\n\n".join(doc.page_content for doc in unique_docs[:10])
 
 print("\nRetrieved Chunks:\n")
 print(context)
