@@ -25,15 +25,6 @@ DocuMind is an intelligent document analysis system that helps users understand 
 - Gemini 1.5 Flash
 - Streamlit
 
-## Project Status
-
-🚧 Currently building ingestion pipeline:
-- [x] PDF text extraction
-- [ ] Table extraction
-- [ ] Image extraction
-- [ ] Metadata storage
-- [ ] Hybrid retrieval
-- [ ] Agent workflow
 
 ## Setup
 
