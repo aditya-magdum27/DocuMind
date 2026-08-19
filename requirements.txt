@@ -1,0 +1,15 @@
+python-dotenv
+langchain-core
+langchain-community
+langchain-text-splitters
+langchain-huggingface
+langchain-chroma
+langchain-groq
+langgraph
+rank_bm25
+numpy
+PyMuPDF
+Pillow
+transformers
+torch
+streamlit
