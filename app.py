@@ -19,7 +19,7 @@ from langchain_chroma import Chroma
 
 from ingest import load_pdf_as_documents
 from document_registry import add_document, list_documents
-from memory_store import load_history
+from memory_store import create_session, list_sessions, get_messages, delete_session
 from rag_query import run_query
 
 PERSIST_DIR = "./chroma_db"
@@ -28,7 +28,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 st.set_page_config(page_title="DocuMind", layout="centered")
 st.title("DocuMind")
-st.caption("Multi-user RAG with OCR routing, hybrid retrieval, and per-document memory")
+st.caption("Multi-user RAG with OCR routing, hybrid retrieval, and saved chat history")
 
 # Stand-in for real auth: one text box for user id, scopes every query
 # and every registry lookup, same as the isolation logic in rag_query.py.
@@ -81,18 +81,58 @@ with tab_chat:
         choice = st.selectbox("Select a document", list(options.keys()))
         document_id = options[choice]
 
-        history = load_history(user_id, document_id)
-        for turn in history:
-            st.chat_message("user").write(turn["question"])
-            st.chat_message("assistant").write(turn["answer"])
+        # ---- chat sessions (stored in the database) ----
+        sel_key = f"session_id::{user_id}::{document_id}"
+        sessions = list_sessions(user_id, document_id)
+        if not sessions:
+            create_session(user_id, document_id)
+            sessions = list_sessions(user_id, document_id)
+
+        col_pick, col_new, col_del = st.columns([4, 1, 1])
+
+        # Buttons are handled BEFORE the selectbox is drawn, so we are
+        # allowed to change its value in session_state here.
+        with col_new:
+            if st.button("New chat"):
+                if sessions[0]["message_count"] == 0:
+                    new_id = sessions[0]["id"]  # latest chat is empty, reuse it
+                else:
+                    new_id = create_session(user_id, document_id)
+                st.session_state[sel_key] = new_id
+                st.rerun()
+        with col_del:
+            if st.button("Delete"):
+                current = st.session_state.get(sel_key, sessions[0]["id"])
+                delete_session(user_id, current)
+                st.session_state.pop(sel_key, None)
+                st.rerun()
+
+        session_ids = [s["id"] for s in sessions]
+        labels = {
+            s["id"]: f"{s['title'] or 'New chat'}  ({s['updated_at'][:16].replace('T', ' ')})"
+            for s in sessions
+        }
+        if st.session_state.get(sel_key) not in session_ids:
+            st.session_state[sel_key] = session_ids[0]
+        with col_pick:
+            session_id = st.selectbox(
+                "Chat", session_ids, format_func=lambda sid: labels[sid], key=sel_key
+            )
+
+        # ---- show the FULL saved chat, with sources ----
+        for m in get_messages(user_id, session_id):
+            with st.chat_message(m["role"]):
+                st.write(m["content"])
+                if m["sources"]:
+                    with st.expander("Sources"):
+                        for s in m["sources"]:
+                            st.write(f"- {s['file']}, page {s['page']}")
 
         query = st.chat_input("Ask a question about this document")
         if query:
             st.chat_message("user").write(query)
             with st.spinner("Thinking..."):
-                result = run_query(user_id, document_id, query, PERSIST_DIR)
-            st.chat_message("assistant").write(result["answer"])
-            if result["sources"]:
-                with st.expander("Sources"):
-                    for s in result["sources"]:
-                        st.write(f"- {s['file']}, page {s['page']}")
+                run_query(user_id, document_id, query, PERSIST_DIR, session_id=session_id)
+            # Rerun so the chat is redrawn from the database (and the chat
+            # title / order in the picker updates).
+            st.rerun()
