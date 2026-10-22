@@ -1,5 +1,6 @@
 import json
 import argparse
+from typing import Optional
 
 import numpy as np
 from dotenv import load_dotenv
@@ -9,7 +10,9 @@ from langchain_chroma import Chroma
 from langchain_core.prompts import PromptTemplate
 from rank_bm25 import BM25Okapi
 
-from memory_store import load_history, save_turn, format_history
+from memory_store import (
+    create_session, session_belongs_to, load_history, save_turn, format_history
+)
 
 load_dotenv()
 
@@ -23,10 +26,19 @@ def _get_embeddings():
     return _embeddings
 
 
-def run_query(user_id: str, document_id: str, query: str, persist_dir: str = "./chroma_db") -> dict:
+def run_query(user_id: str, document_id: str, query: str, persist_dir: str = "./chroma_db",
+              session_id: Optional[str] = None) -> dict:
     """Runs one question against one document: hybrid retrieval
-    (semantic + BM25) scoped to (user_id, document_id), plus rolling
-    conversation memory for that session. Returns {"answer", "sources"}."""
+    (semantic + BM25) scoped to (user_id, document_id), plus conversation
+    memory loaded from the database for this chat session.
+    Returns {"answer", "sources", "session_id"}.
+
+    If session_id is None, a new chat session is created (handy for the CLI)."""
+
+    if session_id is None:
+        session_id = create_session(user_id, document_id)
+    elif not session_belongs_to(user_id, session_id, document_id):
+        raise ValueError("Chat session not found for this user and document.")
 
     vectorstore = Chroma(
         persist_directory=persist_dir,
@@ -53,6 +65,7 @@ def run_query(user_id: str, document_id: str, query: str, persist_dir: str = "./
         return {
             "answer": "I don't know",
             "sources": [],
+            "session_id": session_id,
             "error": "No indexed content found for this document."
         }
 
@@ -105,11 +118,12 @@ def run_query(user_id: str, document_id: str, query: str, persist_dir: str = "./
 
     context = "\n\n".join(doc.page_content for doc in unique_docs[:10])
 
-    # Rolling-window memory: last few turns of this (user, document)
-    # session are prepended as plain text so the model can resolve
-    # follow-up references ("it", "that section") - not treated as
-    # extra facts, only as conversational context.
-    history = load_history(user_id, document_id)
+    # Conversation memory: the last few turns of THIS chat session are
+    # loaded from the database and prepended as plain text so the model
+    # can resolve follow-up references ("it", "that section") - not treated
+    # as extra facts, only as conversational context. The full chat stays
+    # in the DB; only the last few turns go into the prompt.
+    history = load_history(user_id, session_id)
     history_text = format_history(history)
 
     prompt = PromptTemplate(
@@ -161,9 +175,9 @@ Question:
             seen_citations.add(citation)
             sources.append({"file": source, "page": page_display})
 
-    save_turn(user_id, document_id, query, result.content)
+    save_turn(user_id, session_id, query, result.content, sources)
 
-    return {"answer": result.content, "sources": sources}
+    return {"answer": result.content, "sources": sources, "session_id": session_id}
 
 
 def main():
@@ -172,9 +186,12 @@ def main():
     parser.add_argument("--document-id", required=True)
     parser.add_argument("--query", required=True)
     parser.add_argument("--persist-dir", default="./chroma_db")
+    parser.add_argument("--session-id", default=None,
+                        help="Continue an existing chat. Leave out to start a new one.")
     args = parser.parse_args()
 
-    result = run_query(args.user_id, args.document_id, args.query, args.persist_dir)
+    result = run_query(args.user_id, args.document_id, args.query, args.persist_dir,
+                       session_id=args.session_id)
     print(json.dumps(result))
 
 
