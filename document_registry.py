@@ -1,41 +1,37 @@
-"""Tiny JSON-backed registry so the UI can list which documents exist
-per user, without having to scan the whole Chroma store to find out
-what's been ingested."""
+"""Document registry, now a table in documind.db (see db.py) instead of
+documents.json. Function names and return shapes are unchanged, so
+ingest.py and app.py keep working as before."""
 
-import json
-import os
-from datetime import datetime
-from threading import Lock
+from datetime import datetime, timezone
 
-REGISTRY_PATH = "./documents.json"
-_lock = Lock()
-
-
-def _load() -> dict:
-    if not os.path.exists(REGISTRY_PATH):
-        return {}
-    with open(REGISTRY_PATH, "r") as f:
-        return json.load(f)
-
-
-def _save(data: dict) -> None:
-    with open(REGISTRY_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+from db import db_conn
 
 
 def add_document(document_id: str, user_id: str, source_name: str, num_pages: int, ocr_page_count: int) -> None:
-    with _lock:
-        data = _load()
-        data[document_id] = {
-            "user_id": user_id,
-            "source_name": source_name,
-            "num_pages": num_pages,
-            "ocr_page_count": ocr_page_count,
-            "uploaded_at": datetime.utcnow().isoformat(),
-        }
-        _save(data)
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO documents "
+            "(document_id, user_id, source_name, num_pages, ocr_page_count, uploaded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (document_id, user_id, source_name, num_pages, ocr_page_count,
+             datetime.now(timezone.utc).isoformat()),
+        )
 
 
 def list_documents(user_id: str) -> dict:
-    data = _load()
-    return {doc_id: meta for doc_id, meta in data.items() if meta["user_id"] == user_id}
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT document_id, source_name, num_pages, ocr_page_count, uploaded_at "
+            "FROM documents WHERE user_id = ? ORDER BY uploaded_at",
+            (user_id,),
+        ).fetchall()
+    return {
+        r["document_id"]: {
+            "user_id": user_id,
+            "source_name": r["source_name"],
+            "num_pages": r["num_pages"],
+            "ocr_page_count": r["ocr_page_count"],
+            "uploaded_at": r["uploaded_at"],
+        }
+        for r in rows
+    }
