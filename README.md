@@ -1,54 +1,47 @@
 # DocuMind
 
-Multi-user RAG system with OCR routing, hybrid retrieval, and per-document memory.
+A RAG (Retrieval-Augmented Generation) system for **scanned and digital PDFs**. You give it one
+PDF, then ask questions about it and get answers with page-number sources.
+It uses OCR routing for scanned pages, hybrid retrieval (semantic + keyword), and chat memory.
+
+**Scope:** one document at a time, PDF files only. It is not a multi-user or multi-document
+system, and it does not handle images, audio or other file types.
 
 ## What happens on ingest (`ingest.py`)
 
-1. PDF is opened page by page (PyMuPDF).
+1. The PDF is opened page by page (PyMuPDF).
 2. Each page goes through `ocr_router.py`, a LangGraph graph:
    - **`classify_page`** node: tries normal PyMuPDF text extraction. If the
      extracted text is under ~20 characters, the page is flagged
-     `needs_ocr = True` (this is the signature of a scanned/handwritten
-     page - there's no text layer to pull from).
+     `needs_ocr = True` (this is the signature of a scanned or handwritten
+     page - there is no text layer to pull from).
    - **conditional edge**: routes to `run_ocr` only if `needs_ocr` is
      True. Pages with a real text layer skip OCR entirely and go
      straight to `END`.
    - **`run_ocr`** node: renders the page as an image and runs it
      through **TrOCR** (`microsoft/trocr-base-handwritten`) to extract
      text.
-3. All page texts (whichever path each took) are wrapped as LangChain
+3. All page texts (whichever path each page took) are wrapped as LangChain
    `Document`s and chunked (`RecursiveCharacterTextSplitter`,
-   chunk_size=1500, overlap=400) - page metadata carries through
-   automatically.
-4. Each chunk gets `user_id` and `document_id` tagged onto its metadata.
-   This is the entire isolation mechanism: nothing is separated by
-   folder or by collection, it's all enforced by metadata filtering
-   at query time.
-5. Chunks are embedded (`sentence-transformers/all-MiniLM-L6-v2`) and
-   added to a single shared Chroma store.
-6. The document is registered in `documents.json` (a tiny local
-   registry) so the UI can list "which PDFs has this user uploaded"
-   without scanning the whole vector store.
+   chunk_size=1500, overlap=400). Page metadata carries through
+   automatically, so every chunk knows its source file and page.
+4. Chunks are embedded (`sentence-transformers/all-MiniLM-L6-v2`) and
+   stored in a local Chroma vector store.
 
 ## What happens on query (`rag_query.py`)
 
-1. Every read is filtered by `{"document_id": ..., "user_id": ...}` -
-   this is the authorization boundary. User A can never retrieve user
-   B's chunks, and a chat session can never pull chunks from a
-   different document than the one selected.
-2. **Hybrid retrieval**: runs both semantic search (Chroma similarity
-   search over embeddings) and BM25 (keyword/lexical scoring) over the
-   same filtered chunk set, takes the top 10 from each, and de-dupes
+1. **Hybrid retrieval**: runs both semantic search (Chroma similarity
+   search over embeddings) and BM25 (keyword scoring) over the document's
+   chunks, takes the top 10 from each, and de-dupes
    by `(source_file, page)`.
-3. **Memory** (`memory_store.py`): the last 4 (question, answer) turns
-   for this `(user_id, document_id)` session are loaded from a small
-   JSON file and prepended to the prompt as plain text, so the model
-   can resolve follow-up references without treating prior answers as
-   extra document facts.
-4. The context + history + question go into a prompt template and are
-   sent to Groq, constrained to answer only from the given context.
-5. Top 5 unique sources (file + 1-indexed page number) are returned
-   alongside the answer, and the turn is saved to memory.
+2. **Memory** (`memory_store.py`): the last 4 (question, answer) turns
+   of the chat are loaded from a small JSON file and added to the prompt
+   as plain text, so the model can understand follow-up questions
+   without treating earlier answers as extra document facts.
+3. The context, chat history and question go into a prompt template and are
+   sent to Groq. The model is told to answer only from the given context.
+4. The top 5 unique sources (file + 1-indexed page number) are returned
+   with the answer, and the turn is saved to memory.
 
 ## Tech stack
 
@@ -63,20 +56,26 @@ pip install -r requirements.txt
 cp .env.example .env   # add your GROQ_API_KEY
 
 # CLI ingest
-python ingest.py --file mydoc.pdf --user-id u1 --document-id d1 --source-name mydoc.pdf
+python ingest.py --file mydoc.pdf --source-name mydoc.pdf
 
 # CLI query
-python rag_query.py --user-id u1 --document-id d1 --query "What is this document about?"
+python rag_query.py --query "What is this document about?"
 
 # UI
 streamlit run app.py
 ```
 
+Keep your real key only in `.env`. Never commit `.env` or put a key in `.env.example`.
+
 ## Known limitations (honest scope)
 
 - OCR routing uses a simple character-count heuristic (~20 chars), not
-  a trained classifier.
-- Memory is a plain rolling window (last 4 turns), no summarization or
-  vector-based memory.
-- `documents.json` is a flat-file registry, would move to a proper DB
-  table in production.
+  a trained classifier. A page with a little real text and a scanned body
+  can be missed.
+- TrOCR (`trocr-base-handwritten`) is built for single text lines, so
+  dense or multi-column scanned pages may give weaker text.
+- Chat memory is a plain rolling window (last 4 turns) stored in a JSON file,
+  with no summarization or vector-based memory. Storing chat history and
+  context in a database is a planned improvement.
+- Answers are limited to the text found in the PDF. Charts, photos and
+  diagrams inside the PDF are not understood.
